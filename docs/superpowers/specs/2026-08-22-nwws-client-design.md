@@ -217,11 +217,16 @@ received/saved/skipped-as-duplicate, PAN script results, and all errors
 `go-xmpp` ships a `StreamManager` with its own built-in reconnect/backoff, but
 its backoff (20ms base, full jitter, 3-minute cap) doesn't match the spec
 below and it always retries unconditionally — it has no way to express
-`Retry=false`. So `internal/nwwsclient` hand-rolls the reconnect loop instead
-of using `StreamManager`:
+`Retry=false`. Its `EventHandler`/`Event.State` mechanism (the other
+candidate for detecting disconnects) turns out to be unusable from outside
+the library too: `Event.State` is a `SyncConnState` whose state field and
+`getState()` accessor are both unexported, so external code has no way to
+read which connection state actually occurred. So `internal/nwwsclient`
+hand-rolls the reconnect loop using the one externally-observable signal the
+library does provide — the `errorHandler func(error)` callback passed to
+`xmpp.NewClient`, which fires whenever the receive loop's stanza decode
+fails (i.e. on every disconnect):
 
-- Register an `xmpp.EventHandler` via `client.SetHandler` that detects
-  `StateDisconnected`/`StateStreamError` events.
 - If `Retry=true` (default): reconnect with exponential backoff — 1s, 2s, 4s,
   8s, ... capped at 60s — calling `client.Resume()` each attempt. Backoff
   resets to 1s after a successful reconnect + MUC rejoin. Each attempt and
