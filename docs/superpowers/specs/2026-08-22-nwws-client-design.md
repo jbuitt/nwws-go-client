@@ -234,6 +234,17 @@ fails (i.e. on every disconnect):
 - If `Retry=false`: a dropped connection is logged as an ERROR and the
   process exits with a non-zero status instead of reconnecting.
 
+> **Amendment (2026-08-22):** Reconnect attempts call `client.Connect()`, not
+> `client.Resume()`. `Resume()` only redials and re-binds the session — it
+> never starts the keepalive/recv goroutines that `Connect()` starts, and
+> `recv()` is the only code path that reads stanzas and reports future
+> errors. Reconnecting via `Resume()` meant the client silently stopped
+> receiving all products after the first successful reconnect, with no way
+> to even detect a subsequent disconnect. `Connect()` is safe to call again
+> on the same client (the transport unconditionally redials with no guard
+> against reuse), so it's the call that actually gets the client receiving
+> messages again after a drop.
+
 ## Graceful shutdown
 
 On SIGINT/SIGTERM:
