@@ -120,3 +120,23 @@ func TestProduct_Dir(t *testing.T) {
 		t.Errorf("Dir() = %q, want KKCI", p.Dir())
 	}
 }
+
+func TestProduct_SanitizesCCCC(t *testing.T) {
+	p := Product{
+		CCCC:    "../../../../tmp/pwned",
+		TTAAII:  "FTUS21",
+		AWIPSID: "TAFKORD",
+		Issue:   time.Date(2026, 8, 22, 14, 32, 0, 0, time.UTC),
+		ID:      "12345",
+	}
+
+	dir := p.Dir()
+	if strings.Contains(dir, "/") || strings.Contains(dir, "..") {
+		t.Errorf("Dir() = %q, contains unsafe path traversal characters from the raw CCCC", dir)
+	}
+
+	filename := p.Filename()
+	if strings.Contains(filename, "/") || strings.Contains(filename, "..") {
+		t.Errorf("Filename() = %q, contains unsafe path traversal characters from the raw CCCC", filename)
+	}
+}

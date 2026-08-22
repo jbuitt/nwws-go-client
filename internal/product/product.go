@@ -86,16 +86,34 @@ func ParseMessage(msg stanza.Message) (Product, error) {
 
 var idSanitizer = regexp.MustCompile(`[^A-Za-z0-9._-]`)
 
+// dotRunSanitizer catches runs of two or more dots. A single "." is allowed
+// through idSanitizer (legitimate IDs may contain one), but a run of dots
+// left untouched by idSanitizer could otherwise reconstruct a literal ".."
+// once path separators are stripped out around it.
+var dotRunSanitizer = regexp.MustCompile(`\.{2,}`)
+
+// sanitizeID strips any character that isn't safe to embed directly in a
+// filesystem path segment, so untrusted network-supplied fields (cccc,
+// ttaaii, awipsid, id all originate from attributes on an incoming XMPP
+// stanza) can't be used for path traversal or to inject path separators.
+func sanitizeID(s string) string {
+	sanitized := idSanitizer.ReplaceAllString(s, "_")
+	return dotRunSanitizer.ReplaceAllString(sanitized, "_")
+}
+
 // Filename returns the archive filename for this product:
 // [cccc]_[ttaaii]-[awipsid].[ddHHMM]_[id].txt
 func (p Product) Filename() string {
 	ddHHMM := p.Issue.UTC().Format("021504")
-	id := idSanitizer.ReplaceAllString(p.ID, "_")
-	return fmt.Sprintf("%s_%s-%s.%s_%s.txt", p.CCCC, p.TTAAII, p.AWIPSID, ddHHMM, id)
+	cccc := sanitizeID(p.CCCC)
+	ttaaii := sanitizeID(p.TTAAII)
+	awipsid := sanitizeID(p.AWIPSID)
+	id := sanitizeID(p.ID)
+	return fmt.Sprintf("%s_%s-%s.%s_%s.txt", cccc, ttaaii, awipsid, ddHHMM, id)
 }
 
 // Dir returns the subdirectory (relative to the archive root) this product
 // belongs in.
 func (p Product) Dir() string {
-	return p.CCCC
+	return sanitizeID(p.CCCC)
 }
