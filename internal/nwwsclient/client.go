@@ -67,6 +67,22 @@ func (c *Client) handleMessage(_ xmpp.Sender, p stanza.Packet) {
 		return
 	}
 
+	// Register this in-flight handleMessage call on panWG for the entire
+	// duration of the call, not just for the PAN goroutine launched below.
+	// gosrc.io/xmpp's recv() loop spawns a new goroutine per received stanza
+	// to call this handler, so at shutdown there can be a call that hasn't
+	// reached the PAN-launch Add(1) yet even though it's about to. Without
+	// this, shutdown()'s panWG.Wait() could observe a zero counter and race
+	// with a concurrent Add(1), triggering "sync: WaitGroup misuse: Add
+	// called concurrently with Wait". Adding here up front narrows that
+	// window to the moment between the library spawning the per-stanza
+	// goroutine and this statement running — it can't be closed entirely
+	// because the library gives no hook to await in-flight route dispatches
+	// (same accepted residual-risk shape as the stream:error transport-reuse
+	// race noted in Task 11's review).
+	c.panWG.Add(1)
+	defer c.panWG.Done()
+
 	prod, err := product.ParseMessage(msg)
 	if err != nil {
 		c.logger.Warn("skipping unparseable message", slog.Any("error", err))
