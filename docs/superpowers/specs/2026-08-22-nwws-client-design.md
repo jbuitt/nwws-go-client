@@ -40,9 +40,15 @@ loop.
 
 ## Configuration
 
-`internal/config.Config` fields (all from the spec): `Server`, `Port`,
-`Username`, `Password`, `Resource`, `ArchiveDir`, `PanRun`, `PanRunLog`,
-`Retry`, `UseTLS`, `UseSSL`.
+`internal/config.Config` fields: `Server`, `Port`, `Username`, `Password`,
+`Resource`, `ArchiveDir`, `PanRun`, `PanRunLog`, `Retry`, `UseTLS`.
+
+> **Amendment (2026-08-22):** `UseSSL` (implicit/direct TLS) was dropped
+> entirely — no field, CLI flag, env var, or JSON key. Research into the
+> chosen XMPP library (`FluuxIO/go-xmpp`, see "XMPP connection" below) showed
+> it only supports STARTTLS; implicit TLS isn't reachable through its public
+> API without forking it. Real NWWS-OI traffic runs over STARTTLS on port
+> 5222, so this isn't a functional loss.
 
 ### Precedence (highest wins)
 
@@ -66,13 +72,12 @@ loop.
 | PanRunLog | none (PAN output logged to main logger if unset) |
 | Retry | `true` |
 | UseTLS | `true` |
-| UseSSL | `false` |
 
 ### Env var names
 
 `NWWS_SERVER`, `NWWS_PORT`, `NWWS_USERNAME`, `NWWS_PASSWORD`, `NWWS_RESOURCE`,
 `NWWS_ARCHIVEDIR`, `NWWS_PAN_RUN`, `NWWS_PAN_RUN_LOG`, `NWWS_RETRY`,
-`NWWS_USE_TLS`, `NWWS_USE_SSL`.
+`NWWS_USE_TLS`.
 
 ### JSON config file
 
@@ -93,8 +98,7 @@ Example (`config.example.json`):
   "pan_run": "[pan_run]",
   "pan_run_log": "[pan_run_log]",
   "retry": true,
-  "use_tls": true,
-  "use_ssl": false
+  "use_tls": true
 }
 ```
 
@@ -105,20 +109,32 @@ error: log it and exit with status 1 before attempting to connect.
 
 ## XMPP connection
 
-Uses `fluuxio/go-xmpp`. Connects to `<server>:<port>`, authenticates, and
+Uses `FluuxIO/go-xmpp` (module `gosrc.io/xmpp`, packages `gosrc.io/xmpp` and
+`gosrc.io/xmpp/stanza`). Connects to `<server>:<port>`, authenticates, and
 joins the MUC room `nwws@conference.nwws-oi.weather.gov` using the resolved
-`Resource` as the MUC nickname.
+`Resource` as the MUC nickname (as the resource part of the room JID:
+`nwws@conference.nwws-oi.weather.gov/<resource>`).
 
-- `UseSSL=true` → implicit TLS: wrap the socket in TLS before the XMPP
-  handshake begins (no STARTTLS negotiation).
-- `UseSSL=false, UseTLS=true` (default) → connect in plaintext then negotiate
-  STARTTLS.
-- Both false → unencrypted connection is attempted; a WARN is logged since
-  this is discouraged.
-
-The exact `go-xmpp` `Options` fields used to express implicit-TLS vs. STARTTLS
-vs. plaintext will be mapped to whatever that library's API actually exposes
-at implementation time; the behavioral intent above is the contract.
+- `xmpp.Config.Insecure = !UseTLS`. When `UseTLS=true` (default), STARTTLS is
+  required; when `false`, an unencrypted connection is allowed (a WARN is
+  logged at startup since this is discouraged).
+- There is no implicit-TLS option — see the `UseSSL` amendment above.
+- Joining the MUC is not a single library call: the library has no dedicated
+  MUC helper. It's done by sending a `stanza.Presence` to the room JID with a
+  `stanza.MucPresence{}` extension attached (XEP-0045), done from the
+  `Config.` `PostConnectHook`/`StreamManager.PostConnect` callback so it fires
+  on every (re)connect. Leaving is a presence of type `unavailable` to the
+  same room JID.
+- Incoming messages arrive via a `Router` route registered with
+  `router.HandleFunc("message", handler)`; the handler receives a
+  `stanza.Message`.
+- The NWWS-OI product data is a message extension in the `nwws-oi` namespace
+  (`<x xmlns="nwws-oi" ...>`). `go-xmpp` silently drops any XML sub-element it
+  doesn't recognize, so `internal/product` must register a custom
+  `stanza.MsgExtension` type for that namespace in an `init()` function
+  (`stanza.TypeRegistry.MapExtension(stanza.PKTMessage, xml.Name{Space:
+  "nwws-oi", Local: "x"}, NWWSProduct{})`) before any message is received, or
+  the product data is silently lost.
 
 ## Product parsing
 
@@ -198,14 +214,20 @@ received/saved/skipped-as-duplicate, PAN script results, and all errors
 
 ## Reconnection / retry
 
-If `Retry=true` (default) and the XMPP connection drops:
+`go-xmpp` ships a `StreamManager` with its own built-in reconnect/backoff, but
+its backoff (20ms base, full jitter, 3-minute cap) doesn't match the spec
+below and it always retries unconditionally — it has no way to express
+`Retry=false`. So `internal/nwwsclient` hand-rolls the reconnect loop instead
+of using `StreamManager`:
 
-- Reconnect with exponential backoff: 1s, 2s, 4s, 8s, ... capped at 60s.
-- Backoff resets to 1s after a successful reconnect + MUC rejoin.
-- Each attempt and failure is logged.
-
-If `Retry=false`, a dropped connection is logged as an ERROR and the process
-exits with a non-zero status.
+- Register an `xmpp.EventHandler` via `client.SetHandler` that detects
+  `StateDisconnected`/`StateStreamError` events.
+- If `Retry=true` (default): reconnect with exponential backoff — 1s, 2s, 4s,
+  8s, ... capped at 60s — calling `client.Resume()` each attempt. Backoff
+  resets to 1s after a successful reconnect + MUC rejoin. Each attempt and
+  failure is logged.
+- If `Retry=false`: a dropped connection is logged as an ERROR and the
+  process exits with a non-zero status instead of reconnecting.
 
 ## Graceful shutdown
 
@@ -237,3 +259,7 @@ No live or mocked XMPP integration test in this iteration.
   attributes). Not verified against a captured live stanza.
 - PAN script timeout of 30 seconds is a reasonable default, not user-specified.
 - PAN script invoked with the saved file's full path as its only argument.
+- `go-xmpp`'s `Config.Domain` (used in the STARTTLS handshake's SNI/hostname
+  verification) is assumed to equal the configured `Server` hostname — NWWS-OI
+  doesn't use a separate XMPP domain from its connect host as far as could be
+  determined without a live connection to verify.
