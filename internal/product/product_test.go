@@ -82,3 +82,41 @@ func TestParseMessage_InvalidIssueTimestamp(t *testing.T) {
 		t.Fatal("ParseMessage: expected error for invalid issue timestamp")
 	}
 }
+
+func TestProduct_Filename(t *testing.T) {
+	p := Product{
+		CCCC:    "KKCI",
+		TTAAII:  "FTUS21",
+		AWIPSID: "TAFKORD",
+		Issue:   time.Date(2026, 8, 22, 14, 32, 0, 0, time.UTC),
+		ID:      "12345",
+	}
+
+	got := p.Filename()
+	want := "KKCI_FTUS21-TAFKORD.221432_12345.txt"
+	if got != want {
+		t.Errorf("Filename() = %q, want %q", got, want)
+	}
+}
+
+func TestProduct_Filename_SanitizesID(t *testing.T) {
+	p := Product{
+		CCCC:    "KKCI",
+		TTAAII:  "FTUS21",
+		AWIPSID: "TAFKORD",
+		Issue:   time.Date(2026, 8, 22, 14, 32, 0, 0, time.UTC),
+		ID:      "abc/def ghi",
+	}
+
+	got := p.Filename()
+	if strings.ContainsAny(got, "/ ") {
+		t.Errorf("Filename() = %q, contains unsafe characters from the raw ID", got)
+	}
+}
+
+func TestProduct_Dir(t *testing.T) {
+	p := Product{CCCC: "KKCI"}
+	if p.Dir() != "KKCI" {
+		t.Errorf("Dir() = %q, want KKCI", p.Dir())
+	}
+}

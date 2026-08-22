@@ -3,6 +3,7 @@ package product
 import (
 	"encoding/xml"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -81,4 +82,20 @@ func ParseMessage(msg stanza.Message) (Product, error) {
 		ID:      ext.ID,
 		Text:    ext.Text,
 	}, nil
+}
+
+var idSanitizer = regexp.MustCompile(`[^A-Za-z0-9._-]`)
+
+// Filename returns the archive filename for this product:
+// [cccc]_[ttaaii]-[awipsid].[ddHHMM]_[id].txt
+func (p Product) Filename() string {
+	ddHHMM := p.Issue.UTC().Format("021504")
+	id := idSanitizer.ReplaceAllString(p.ID, "_")
+	return fmt.Sprintf("%s_%s-%s.%s_%s.txt", p.CCCC, p.TTAAII, p.AWIPSID, ddHHMM, id)
+}
+
+// Dir returns the subdirectory (relative to the archive root) this product
+// belongs in.
+func (p Product) Dir() string {
+	return p.CCCC
 }
