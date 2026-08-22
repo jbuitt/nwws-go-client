@@ -7,6 +7,7 @@ import (
 	"context"
 	"log/slog"
 	"os/exec"
+	"syscall"
 	"time"
 )
 
@@ -28,6 +29,19 @@ func Run(logger *slog.Logger, panRun, filePath string) {
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &out
+
+	// Put the child in its own process group and, on timeout/cancellation,
+	// kill the whole group rather than just the direct child. Without
+	// this, exec.CommandContext's default cancellation only kills panRun
+	// itself: if panRun forks a subprocess (backgrounds a task, shells out
+	// to curl/mail, etc.) before the timeout fires, that subprocess is
+	// reparented and keeps running indefinitely, undetected. This
+	// contradicts the guarantee that a hung/slow PAN script can never
+	// accumulate indefinitely.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error {
+		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	}
 
 	start := time.Now()
 	err := cmd.Run()
