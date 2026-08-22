@@ -153,7 +153,6 @@ func (c *Client) Run(ctx context.Context) error {
 		})
 	}
 	client.PostConnectHook = joinMUC
-	client.PostResumeHook = joinMUC
 
 	shutdown := func() {
 		c.logger.Info("shutting down, leaving MUC room")
@@ -179,6 +178,7 @@ func (c *Client) Run(ctx context.Context) error {
 		case connErr := <-errCh:
 			c.logger.Warn("xmpp connection error", slog.Any("error", connErr))
 			if !c.cfg.Retry {
+				c.waitForPAN(5 * time.Second)
 				return fmt.Errorf("disconnected from NWWS-OI server: %w", connErr)
 			}
 
@@ -192,7 +192,7 @@ func (c *Client) Run(ctx context.Context) error {
 				return nil
 			}
 
-			if err := client.Resume(); err != nil {
+			if err := client.Connect(); err != nil {
 				c.logger.Error("reconnect attempt failed", slog.Any("error", err))
 				reportErr(err)
 				continue
