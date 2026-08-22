@@ -1,6 +1,10 @@
 package config
 
-import "math/rand/v2"
+import (
+	"flag"
+	"fmt"
+	"math/rand/v2"
+)
 
 // Config holds all settings the client needs, resolved from CLI flags,
 // environment variables, and an optional JSON file (see Load).
@@ -47,4 +51,83 @@ func randomSuffix(n int) string {
 		b[i] = alphabet[rand.IntN(len(alphabet))]
 	}
 	return string(b)
+}
+
+// Load resolves the final Config from CLI args, environment variables, and
+// an optional JSON config file, in that order of precedence (CLI args win).
+func Load(args []string) (Config, error) {
+	return load(args, DefaultConfigPath)
+}
+
+// load is Load with the default config file path as a parameter, so tests
+// can exercise "no JSON file present" without needing to pass -config.
+func load(args []string, defaultConfigPath string) (Config, error) {
+	cfg := Defaults()
+
+	fs := flag.NewFlagSet("nwws-go-client", flag.ContinueOnError)
+	configPath := fs.String("config", defaultConfigPath, "path to JSON config file")
+	server := fs.String("server", "", "NWWS server hostname")
+	port := fs.Int("port", 0, "NWWS server port")
+	username := fs.String("username", "", "NWWS username")
+	password := fs.String("password", "", "NWWS password")
+	resource := fs.String("resource", "", "XMPP resource name")
+	archiveDir := fs.String("archivedir", "", "directory to store products in")
+	panRun := fs.String("pan_run", "", "PAN script/executable to run after each saved product")
+	panRunLog := fs.String("pan_run_log", "", "log file for PAN script output (defaults to main log)")
+	retry := fs.Bool("retry", DefaultRetry, "automatically reconnect if disconnected")
+	useTLS := fs.Bool("use_tls", DefaultUseTLS, "use STARTTLS when connecting")
+
+	if err := fs.Parse(args); err != nil {
+		return Config{}, err
+	}
+
+	explicit := map[string]bool{}
+	fs.Visit(func(f *flag.Flag) { explicit[f.Name] = true })
+
+	jc, err := loadJSONFile(*configPath, explicit["config"])
+	if err != nil {
+		return Config{}, err
+	}
+	applyJSON(&cfg, jc)
+
+	if err := applyEnv(&cfg); err != nil {
+		return Config{}, err
+	}
+
+	if explicit["server"] {
+		cfg.Server = *server
+	}
+	if explicit["port"] {
+		cfg.Port = *port
+	}
+	if explicit["username"] {
+		cfg.Username = *username
+	}
+	if explicit["password"] {
+		cfg.Password = *password
+	}
+	if explicit["resource"] {
+		cfg.Resource = *resource
+	}
+	if explicit["archivedir"] {
+		cfg.ArchiveDir = *archiveDir
+	}
+	if explicit["pan_run"] {
+		cfg.PanRun = *panRun
+	}
+	if explicit["pan_run_log"] {
+		cfg.PanRunLog = *panRunLog
+	}
+	if explicit["retry"] {
+		cfg.Retry = *retry
+	}
+	if explicit["use_tls"] {
+		cfg.UseTLS = *useTLS
+	}
+
+	if cfg.Username == "" || cfg.Password == "" {
+		return Config{}, fmt.Errorf("username and password are required (set via -username/-password flags, NWWS_USERNAME/NWWS_PASSWORD env vars, or the config file)")
+	}
+
+	return cfg, nil
 }
