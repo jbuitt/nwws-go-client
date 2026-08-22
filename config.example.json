@@ -1,0 +1,12 @@
+{
+  "server": "nwws-oi.weather.gov",
+  "port": 5222,
+  "username": "[username]",
+  "password": "[password]",
+  "resource": "[resource]",
+  "archivedir": "[archivedir]",
+  "pan_run": "[pan_run]",
+  "pan_run_log": "[pan_run_log]",
+  "retry": true,
+  "use_tls": true
+}
