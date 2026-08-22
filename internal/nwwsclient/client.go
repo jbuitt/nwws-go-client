@@ -1,6 +1,8 @@
 package nwwsclient
 
 import (
+	"context"
+	"fmt"
 	"log/slog"
 	"sync"
 	"time"
@@ -104,5 +106,99 @@ func (c *Client) waitForPAN(timeout time.Duration) {
 	case <-done:
 	case <-time.After(timeout):
 		c.logger.Warn("timed out waiting for in-flight PAN scripts")
+	}
+}
+
+// Run connects to the NWWS-OI server, joins the MUC room, and processes
+// incoming products until ctx is cancelled. It reconnects on connection
+// loss according to cfg.Retry. It returns nil on a clean shutdown (ctx
+// cancelled) or an error if the connection was lost and Retry is false.
+func (c *Client) Run(ctx context.Context) error {
+	if !c.cfg.UseTLS {
+		c.logger.Warn("use_tls is disabled; connecting without STARTTLS")
+	}
+
+	router := xmpp.NewRouter()
+	router.HandleFunc("message", c.handleMessage)
+
+	errCh := make(chan error, 1)
+	reportErr := func(err error) {
+		select {
+		case errCh <- err:
+		default:
+		}
+	}
+
+	xmppCfg := xmpp.Config{
+		TransportConfiguration: xmpp.TransportConfiguration{
+			Address: fmt.Sprintf("%s:%d", c.cfg.Server, c.cfg.Port),
+		},
+		Jid:        fmt.Sprintf("%s@%s/%s", c.cfg.Username, c.cfg.Server, c.cfg.Resource),
+		Credential: xmpp.Password(c.cfg.Password),
+		Insecure:   !c.cfg.UseTLS,
+	}
+
+	client, err := xmpp.NewClient(&xmppCfg, router, reportErr)
+	if err != nil {
+		return fmt.Errorf("configuring xmpp client: %w", err)
+	}
+
+	joinMUC := func() error {
+		c.logger.Info("joining MUC room", slog.String("room", mucRoom))
+		return client.Send(stanza.Presence{
+			Attrs: stanza.Attrs{To: mucJID(c.cfg.Resource)},
+			Extensions: []stanza.PresExtension{
+				stanza.MucPresence{History: stanza.History{MaxStanzas: stanza.NewNullableInt(0)}},
+			},
+		})
+	}
+	client.PostConnectHook = joinMUC
+	client.PostResumeHook = joinMUC
+
+	shutdown := func() {
+		c.logger.Info("shutting down, leaving MUC room")
+		_ = client.Send(stanza.Presence{
+			Attrs: stanza.Attrs{To: mucJID(c.cfg.Resource), Type: stanza.StanzaType("unavailable")},
+		})
+		_ = client.Disconnect()
+		c.waitForPAN(5 * time.Second)
+	}
+
+	c.logger.Info("connecting to NWWS-OI", slog.String("server", c.cfg.Server), slog.Int("port", c.cfg.Port))
+	if err := client.Connect(); err != nil {
+		return fmt.Errorf("connecting to %s:%d: %w", c.cfg.Server, c.cfg.Port, err)
+	}
+
+	attempt := 0
+	for {
+		select {
+		case <-ctx.Done():
+			shutdown()
+			return nil
+
+		case connErr := <-errCh:
+			c.logger.Warn("xmpp connection error", slog.Any("error", connErr))
+			if !c.cfg.Retry {
+				return fmt.Errorf("disconnected from NWWS-OI server: %w", connErr)
+			}
+
+			delay := nextBackoff(attempt)
+			attempt++
+			c.logger.Info("reconnecting to NWWS-OI", slog.Duration("delay", delay), slog.Int("attempt", attempt))
+			select {
+			case <-time.After(delay):
+			case <-ctx.Done():
+				shutdown()
+				return nil
+			}
+
+			if err := client.Resume(); err != nil {
+				c.logger.Error("reconnect attempt failed", slog.Any("error", err))
+				reportErr(err)
+				continue
+			}
+			c.logger.Info("reconnected to NWWS-OI")
+			attempt = 0
+		}
 	}
 }
