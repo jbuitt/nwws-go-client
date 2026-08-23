@@ -8,6 +8,13 @@ weather products, and saves them to `products/<cccc>/`.
 
     go build -o nwws-go-client ./cmd/nwws-go-client
 
+This project depends on a locally vendored, lightly patched fork of
+`gosrc.io/xmpp` at `third_party/gosrc.io-xmpp/` (wired in via a `replace`
+directive in `go.mod`) — see that directory's `stanza/parser.go` (search for
+`PATCHED`) and the design spec's "Resolved issue" section for what's
+different from upstream and why. It's part of this repo, so a normal `go
+build`/`go get` needs no extra setup.
+
 ## Configure
 
 Configuration is resolved from, in order of priority (highest wins):
@@ -62,3 +69,13 @@ treat it as sensitive, don't commit it or paste it in full anywhere. When
 sharing it for troubleshooting, share only the portion from after the
 `connecting to NWWS-OI` / auth-success point onward (e.g. everything from
 the outgoing `<presence>` MUC-join stanza forward).
+
+If you hit an `"unknown namespace ..."` error right after `"joining MUC
+room"`: this was previously a real, confirmed bug — a non-conforming client
+elsewhere in the MUC room sends its presence with an incorrectly-declared
+namespace, and the underlying XMPP library rejected the whole connection
+over it. It's fixed via the vendored fork mentioned above, which tolerates
+this for any of `message`/`presence`/`iq`. If you still see it on a current
+build, capture `-debug_xmpp_log` and see the design spec's "Resolved issue"
+section for how the original was diagnosed — it may be a different,
+not-yet-seen malformation.

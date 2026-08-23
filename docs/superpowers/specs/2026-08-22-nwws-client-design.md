@@ -298,40 +298,56 @@ No live or mocked XMPP integration test in this iteration.
   doesn't use a separate XMPP domain from its connect host as far as could be
   determined without a live connection to verify.
 
-## Known open issue (2026-08-23)
+## Resolved issue: "unknown namespace ... <presence/>" on MUC join (2026-08-23)
 
 A real user with valid NWWS-OI credentials hit `"xmpp connection error"
 error="unknown namespace http://jabber.org/protocol/muc <presence/>"`
-immediately after `"joining MUC room"` logged. Root-cause investigation so
-far: the exact error string was traced to `stanza.NextPacket`'s top-level
-dispatch (`gosrc.io/xmpp@v0.5.1/stanza/parser.go`), meaning the decoder
-encountered a top-level stanza whose root element was locally named
-`presence` under an active default namespace of `http://jabber.org/protocol/muc`
-— not the expected `jabber:client`. Several plausible reconstructions of a
-XEP-0045 join-confirmation presence (bare, with `<status code="110"/>`, with
-an XEP-0203 `<delay>` stamp, an error/rejection presence) were fed through
-the actual library decoder and all decoded cleanly with no desync, which
-rules out the initial hypothesis (that the library's failure to register a
-`PresExtension` for the `http://jabber.org/protocol/muc#user` namespace
-causes a token-stream desync — verified false: unrecognized elements are
-simply skipped token-by-token without desyncing, confirmed via direct
-reproduction). No NWWS-OI test credentials were available to reproduce
-against the real server directly, so a `-debug_xmpp_log <path>` CLI flag was
-added (`internal/config`, wired in `internal/nwwsclient.Run`) to capture raw
-wire traffic from an affected user's real session for further diagnosis.
+immediately after `"joining MUC room"` logged, followed by a permanent
+reconnect loop that never actually recovered.
 
-Pattern-analysis step (comparing against the user's known-working reference
-Python/slixmpp client): the join request's `<history maxstanzas="0">` was a
-deviation from that reference, which requests no history element at all
-(server default). This was an unrequested addition made during Task 11's
-implementation, not something the design ever called for. As a cheap,
-well-motivated experiment pending confirmation, `joinMUC` in
-`internal/nwwsclient/client.go` now sends `stanza.MucPresence{}` with no
-`History` set (which the library's `MarshalXML` omits entirely, verified via
-direct marshal output), matching the reference client's request shape. Not
-yet confirmed against the real server. If this resolves it, the true root
-cause is presumably a NWWS-OI-server-side (or intermediate proxy) quirk when
-handling a zero-stanza history request — worth reporting upstream if
-confirmed. If it does NOT resolve it, capture `-debug_xmpp_log` output for
-further diagnosis (see README's Troubleshooting section for how to share it
-safely).
+**Investigation.** The error string was traced to `stanza.NextPacket`'s
+top-level dispatch (`gosrc.io/xmpp@v0.5.1/stanza/parser.go`), which requires
+a top-level stanza's namespace to be one of a small fixed set
+(`jabber:client` etc.) and hard-fails the entire connection otherwise. Two
+hypotheses were tested and ruled out before the real cause was found:
+(1) a missing `PresExtension` registration for `http://jabber.org/protocol/muc#user`
+causing decoder desync — disproven by feeding several realistic
+join-confirmation reconstructions through the actual decoder, all of which
+decoded cleanly; (2) the client's own `<history maxstanzas="0">` request (an
+unrequested addition from Task 11, deviating from the reference
+Python/slixmpp client) triggering a server-side quirk — removed as a cheap
+experiment, but the live server still failed identically, ruling it out too
+(the history-request removal was kept anyway, since matching the reference
+client's plainer join request has no downside).
+
+**Root cause, confirmed via live capture.** With the user's explicit
+permission, a `-debug_xmpp_log` capture was taken against the real NWWS-OI
+server. It showed the exact failing stanza: one MUC occupant (nickname
+`listener`, evidently a bot/service account and a persistent room member)
+broadcasts its presence as
+`<presence xmlns="http://jabber.org/protocol/muc" ...>` — incorrectly
+declaring the MUC namespace on the presence element itself, instead of only
+on the inner `<x>` child, unlike every other of the ~30 occupants replayed
+on join (various slixmpp/Smack/Openfire clients). This is a bug in that
+occupant's own XMPP client, not something NWWS-OI or this project controls
+— but because the room replays every current occupant's presence on every
+join, and `listener` is apparently always present, this occurred on
+essentially every connection attempt, permanently.
+
+**Fix.** `gosrc.io/xmpp` offers no supported hook to recover from a single
+malformed stanza without tearing down the whole connection (the failure
+happens inside the library's own unexported `recv()` loop). So the project
+now vendors a small, surgically patched fork of the library at
+`third_party/gosrc.io-xmpp/`, wired in via a `replace` directive in `go.mod`.
+The only change (`stanza/parser.go`, clearly marked `PATCHED`) makes
+`NextPacket` fall back to dispatching by local name (`message`/`presence`/
+`iq`) when the top-level namespace isn't recognized, rather than hard-erroring
+— matching how other mature XMPP clients (slixmpp, Smack) tolerate this same
+non-conformance. Verified against the exact captured malformed stanza (now
+decodes cleanly) and against the live server end-to-end: the client stays
+connected, joins the room, and continuously saves real weather products
+without disconnecting.
+
+**Maintenance implication:** upgrading `gosrc.io/xmpp` requires re-applying
+this patch to the new version (it's a ~15-line, clearly isolated change, not
+expected to be hard to reapply).
