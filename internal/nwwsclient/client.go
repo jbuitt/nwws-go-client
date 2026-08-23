@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 	"sync"
 	"time"
 
@@ -125,6 +126,28 @@ func (c *Client) waitForPAN(timeout time.Duration) {
 	}
 }
 
+// runCancelable runs fn in a goroutine and returns its result, unless ctx is
+// cancelled first, in which case it returns ctx.Err() immediately without
+// waiting for fn. This exists because gosrc.io/xmpp's Client.Connect() sets
+// no read deadline beyond the initial TCP dial (confirmed by reading
+// session.go: none of its Decode calls for stream features, SASL, or IQ
+// bind/session ever call SetReadDeadline) — if the server stops responding
+// mid-handshake, Connect() can block forever with no way to cancel it
+// directly. Abandoning fn when ctx fires is safe here: the only callers are
+// in Run(), and a cancelled Run() means the whole process exits shortly
+// after, at which point any still-blocked goroutine is simply terminated
+// along with everything else.
+func runCancelable(ctx context.Context, fn func() error) error {
+	done := make(chan error, 1)
+	go func() { done <- fn() }()
+	select {
+	case err := <-done:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 // Run connects to the NWWS-OI server, joins the MUC room, and processes
 // incoming products until ctx is cancelled. It reconnects on connection
 // loss according to cfg.Retry. It returns nil on a clean shutdown (ctx
@@ -154,6 +177,17 @@ func (c *Client) Run(ctx context.Context) error {
 		Insecure:   !c.cfg.UseTLS,
 	}
 
+	if c.cfg.DebugXMPPLog != "" {
+		f, err := os.Create(c.cfg.DebugXMPPLog)
+		if err != nil {
+			return fmt.Errorf("opening debug_xmpp_log %q: %w", c.cfg.DebugXMPPLog, err)
+		}
+		defer f.Close()
+		xmppCfg.StreamLogger = f
+		c.logger.Warn("raw XMPP wire traffic logging enabled; this file will contain your base64-encoded SASL credentials, treat it as sensitive",
+			slog.String("path", c.cfg.DebugXMPPLog))
+	}
+
 	client, err := xmpp.NewClient(&xmppCfg, router, reportErr)
 	if err != nil {
 		return fmt.Errorf("configuring xmpp client: %w", err)
@@ -180,7 +214,10 @@ func (c *Client) Run(ctx context.Context) error {
 	}
 
 	c.logger.Info("connecting to NWWS-OI", slog.String("server", c.cfg.Server), slog.Int("port", c.cfg.Port))
-	if err := client.Connect(); err != nil {
+	if err := runCancelable(ctx, client.Connect); err != nil {
+		if ctx.Err() != nil {
+			return nil // shutdown requested while connecting
+		}
 		return fmt.Errorf("connecting to %s:%d: %w", c.cfg.Server, c.cfg.Port, err)
 	}
 
@@ -208,7 +245,19 @@ func (c *Client) Run(ctx context.Context) error {
 				return nil
 			}
 
-			if err := client.Connect(); err != nil {
+			if err := runCancelable(ctx, client.Connect); err != nil {
+				if ctx.Err() != nil {
+					// Don't call shutdown() here: if client.Connect() is
+					// still blocked in the background (runCancelable gave up
+					// on waiting for it, but didn't stop it), calling
+					// client.Disconnect() concurrently would race with that
+					// abandoned goroutine mutating the same transport
+					// fields. Just drain PAN and exit; the process ending
+					// terminates the stuck goroutine along with everything
+					// else.
+					c.waitForPAN(5 * time.Second)
+					return nil
+				}
 				c.logger.Error("reconnect attempt failed", slog.Any("error", err))
 				reportErr(err)
 				continue

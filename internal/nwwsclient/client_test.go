@@ -2,7 +2,9 @@ package nwwsclient
 
 import (
 	"bytes"
+	"context"
 	"encoding/xml"
+	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -86,6 +88,35 @@ func TestHandleMessage_IgnoresNonMessagePackets(t *testing.T) {
 	}
 	if len(entries) != 0 {
 		t.Errorf("expected no files to be written for a non-message packet, found %d", len(entries))
+	}
+}
+
+func TestRunCancelable_ReturnsFnResultWhenFnFinishesFirst(t *testing.T) {
+	err := runCancelable(context.Background(), func() error {
+		return errors.New("boom")
+	})
+	if err == nil || err.Error() != "boom" {
+		t.Errorf("runCancelable() = %v, want boom", err)
+	}
+}
+
+func TestRunCancelable_ReturnsCtxErrWhenFnHangsForever(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	start := time.Now()
+	err := runCancelable(ctx, func() error {
+		select {} // simulates client.Connect() blocking forever on an
+		// unresponsive server, since the underlying XMPP library sets no
+		// read deadline on the connection beyond the initial TCP dial.
+	})
+	elapsed := time.Since(start)
+
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("runCancelable() error = %v, want context.DeadlineExceeded", err)
+	}
+	if elapsed > time.Second {
+		t.Errorf("runCancelable() took %v to return, want it to return promptly once ctx is done, not wait for fn", elapsed)
 	}
 }
 
