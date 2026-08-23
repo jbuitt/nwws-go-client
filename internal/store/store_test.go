@@ -32,7 +32,7 @@ func TestWriteProduct_CreatesFile(t *testing.T) {
 		t.Errorf("result = %v, want Written", result)
 	}
 
-	wantPath := filepath.Join(dir, "KKCI", "KKCI_FTUS21-TAFKORD.221432_12345.txt")
+	wantPath := filepath.Join(dir, "kkci", "kkci_ftus21-tafkord.221432_12345.txt")
 	if path != wantPath {
 		t.Errorf("path = %q, want %q", path, wantPath)
 	}

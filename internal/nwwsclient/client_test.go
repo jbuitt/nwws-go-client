@@ -65,7 +65,7 @@ func TestHandleMessage_SavesProduct(t *testing.T) {
 
 	c.handleMessage(nil, msg)
 
-	wantPath := filepath.Join(dir, "KKCI", "KKCI_FTUS21-TAFKORD.221432_99.txt")
+	wantPath := filepath.Join(dir, "kkci", "kkci_ftus21-tafkord.221432_99.txt")
 	data, err := os.ReadFile(wantPath)
 	if err != nil {
 		t.Fatalf("expected product file at %s, got error: %v", wantPath, err)

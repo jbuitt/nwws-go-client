@@ -93,7 +93,23 @@ func TestProduct_Filename(t *testing.T) {
 	}
 
 	got := p.Filename()
-	want := "KKCI_FTUS21-TAFKORD.221432_12345.txt"
+	want := "kkci_ftus21-tafkord.221432_12345.txt"
+	if got != want {
+		t.Errorf("Filename() = %q, want %q", got, want)
+	}
+}
+
+func TestProduct_Filename_ReplacesNwwsProcessorInID(t *testing.T) {
+	p := Product{
+		CCCC:    "KKCI",
+		TTAAII:  "FTUS21",
+		AWIPSID: "TAFKORD",
+		Issue:   time.Date(2026, 8, 22, 14, 32, 0, 0, time.UTC),
+		ID:      "nwws_processor.2953",
+	}
+
+	got := p.Filename()
+	want := "kkci_ftus21-tafkord.221432_0000.2953.txt"
 	if got != want {
 		t.Errorf("Filename() = %q, want %q", got, want)
 	}
@@ -116,8 +132,8 @@ func TestProduct_Filename_SanitizesID(t *testing.T) {
 
 func TestProduct_Dir(t *testing.T) {
 	p := Product{CCCC: "KKCI"}
-	if p.Dir() != "KKCI" {
-		t.Errorf("Dir() = %q, want KKCI", p.Dir())
+	if p.Dir() != "kkci" {
+		t.Errorf("Dir() = %q, want kkci", p.Dir())
 	}
 }
 

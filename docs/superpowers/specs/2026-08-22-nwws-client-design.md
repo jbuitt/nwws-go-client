@@ -178,6 +178,14 @@ stanza — the receive loop must never crash or block on malformed input.
 `[A-Za-z0-9._-]` only before being embedded in a filename (defense against
 unexpected characters from upstream).
 
+> **Amendment (2026-08-23):** the whole filename, and the `[cccc]` directory
+> name from `Dir()`, are lowercased (`strings.ToLower`) after assembly, per
+> user request. Also, the literal substring `nwws_processor` occurring in
+> `ID` (NWWS-OI sometimes prepends a routing/relay tag like
+> `nwws_processor.2953`, which carries no product-identity information) is
+> replaced with `0000` before sanitization, so e.g. id `nwws_processor.2953`
+> becomes `0000.2953` in the filename.
+
 ## Storage
 
 `internal/store.WriteProduct(archiveDir string, p Product) error`:

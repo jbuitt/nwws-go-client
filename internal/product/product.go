@@ -101,19 +101,25 @@ func sanitizeID(s string) string {
 	return dotRunSanitizer.ReplaceAllString(sanitized, "_")
 }
 
-// Filename returns the archive filename for this product:
-// [cccc]_[ttaaii]-[awipsid].[ddHHMM]_[id].txt
+// nwwsProcessorTag is a routing/relay tag NWWS-OI sometimes prepends to the
+// id attribute (e.g. "nwws_processor.2953"). It carries no product-identity
+// information, so it's replaced with a fixed placeholder rather than kept.
+const nwwsProcessorTag = "nwws_processor"
+
+// Filename returns the archive filename for this product, entirely
+// lowercase: [cccc]_[ttaaii]-[awipsid].[ddHHMM]_[id].txt
 func (p Product) Filename() string {
 	ddHHMM := p.Issue.UTC().Format("021504")
 	cccc := sanitizeID(p.CCCC)
 	ttaaii := sanitizeID(p.TTAAII)
 	awipsid := sanitizeID(p.AWIPSID)
-	id := sanitizeID(p.ID)
-	return fmt.Sprintf("%s_%s-%s.%s_%s.txt", cccc, ttaaii, awipsid, ddHHMM, id)
+	id := sanitizeID(strings.ReplaceAll(p.ID, nwwsProcessorTag, "0000"))
+	name := fmt.Sprintf("%s_%s-%s.%s_%s.txt", cccc, ttaaii, awipsid, ddHHMM, id)
+	return strings.ToLower(name)
 }
 
 // Dir returns the subdirectory (relative to the archive root) this product
-// belongs in.
+// belongs in, lowercase.
 func (p Product) Dir() string {
-	return sanitizeID(p.CCCC)
+	return strings.ToLower(sanitizeID(p.CCCC))
 }
