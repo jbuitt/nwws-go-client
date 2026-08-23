@@ -79,3 +79,12 @@ this for any of `message`/`presence`/`iq`. If you still see it on a current
 build, capture `-debug_xmpp_log` and see the design spec's "Resolved issue"
 section for how the original was diagnosed — it may be a different,
 not-yet-seen malformation.
+
+## Author
+
++       [jbuitt at gmail.com](mailto:jbuitt@gmail.com)
+
+## License
+
+See [LICENSE](https://github.com/jbuitt/nwws-go-client/blob/master/LICENSE) file.
+
