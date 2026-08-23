@@ -82,7 +82,7 @@ not-yet-seen malformation.
 
 ## Author
 
-[jbuitt at gmail.com](mailto:jbuitt@gmail.com)
+[jim.buitt at gmail.com](mailto:jim.buitt@gmail.com)
 
 ## License
 
