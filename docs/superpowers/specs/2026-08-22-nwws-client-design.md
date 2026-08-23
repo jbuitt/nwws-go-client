@@ -319,4 +319,19 @@ reproduction). No NWWS-OI test credentials were available to reproduce
 against the real server directly, so a `-debug_xmpp_log <path>` CLI flag was
 added (`internal/config`, wired in `internal/nwwsclient.Run`) to capture raw
 wire traffic from an affected user's real session for further diagnosis.
-Still open pending that evidence.
+
+Pattern-analysis step (comparing against the user's known-working reference
+Python/slixmpp client): the join request's `<history maxstanzas="0">` was a
+deviation from that reference, which requests no history element at all
+(server default). This was an unrequested addition made during Task 11's
+implementation, not something the design ever called for. As a cheap,
+well-motivated experiment pending confirmation, `joinMUC` in
+`internal/nwwsclient/client.go` now sends `stanza.MucPresence{}` with no
+`History` set (which the library's `MarshalXML` omits entirely, verified via
+direct marshal output), matching the reference client's request shape. Not
+yet confirmed against the real server. If this resolves it, the true root
+cause is presumably a NWWS-OI-server-side (or intermediate proxy) quirk when
+handling a zero-stanza history request — worth reporting upstream if
+confirmed. If it does NOT resolve it, capture `-debug_xmpp_log` output for
+further diagnosis (see README's Troubleshooting section for how to share it
+safely).

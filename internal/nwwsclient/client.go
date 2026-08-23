@@ -195,11 +195,19 @@ func (c *Client) Run(ctx context.Context) error {
 
 	joinMUC := func() error {
 		c.logger.Info("joining MUC room", slog.String("room", mucRoom))
+		// No explicit <history> element: let the server use its own
+		// default (matches the reference Python/slixmpp client's
+		// join_muc(), which also doesn't request one). A prior version
+		// explicitly requested maxstanzas="0" to suppress replay on
+		// reconnect, which is a deliberate deviation from that reference
+		// implementation and a plausible (unconfirmed) contributor to a
+		// "unknown namespace ... <presence/>" decode error a user hit
+		// right after MUC join — see the design spec's "Known open
+		// issue" note. stanza.MucPresence{} with a zero-value History
+		// omits the <history> element from the marshaled XML entirely.
 		return client.Send(stanza.Presence{
-			Attrs: stanza.Attrs{To: mucJID(c.cfg.Resource)},
-			Extensions: []stanza.PresExtension{
-				stanza.MucPresence{History: stanza.History{MaxStanzas: stanza.NewNullableInt(0)}},
-			},
+			Attrs:      stanza.Attrs{To: mucJID(c.cfg.Resource)},
+			Extensions: []stanza.PresExtension{stanza.MucPresence{}},
 		})
 	}
 	client.PostConnectHook = joinMUC
