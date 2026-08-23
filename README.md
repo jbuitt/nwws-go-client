@@ -86,4 +86,4 @@ not-yet-seen malformation.
 
 ## License
 
-See [LICENSE](https://github.com/jbuitt/nwws-go-client/blob/master/LICENSE) file.
+See [LICENSE](https://github.com/jbuitt/nwws-go-client/blob/main/LICENSE) file.
