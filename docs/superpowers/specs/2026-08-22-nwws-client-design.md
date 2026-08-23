@@ -255,6 +255,24 @@ On SIGINT/SIGTERM:
 3. Wait up to 5 seconds for in-flight PAN goroutines to finish.
 4. Exit 0.
 
+> **Amendment (2026-08-23):** `client.Connect()` calls (both the initial
+> connect and each reconnect attempt) are wrapped in a `runCancelable(ctx,
+> client.Connect)` helper that races the call against `ctx.Done()`. This was
+> added after a real user hit an unresponsive Ctrl+C: `gosrc.io/xmpp`'s
+> connect/auth/bind path never sets a read deadline on the connection beyond
+> the initial TCP dial's `ConnectTimeout` (confirmed by reading `session.go`
+> — none of its `Decode` calls for stream features, SASL, or IQ bind/session
+> call `SetReadDeadline`), so if the server stops responding mid-handshake,
+> `client.Connect()` can block indefinitely with nothing to interrupt it.
+> `runCancelable` abandons the blocked call and returns `ctx.Err()`
+> immediately instead; the leaked goroutine is harmless since the whole
+> process exits shortly after a cancelled `Run()` returns. On the shutdown
+> path taken this way, `shutdown()` (which sends unavailable-presence and
+> calls `client.Disconnect()`) is deliberately skipped in favor of just
+> draining PAN goroutines, since calling `Disconnect()` while the abandoned
+> `Connect()` goroutine might still be mutating the same transport object
+> would risk a data race.
+
 ## Testing
 
 Table-driven unit tests for the pure-logic packages:
@@ -279,3 +297,26 @@ No live or mocked XMPP integration test in this iteration.
   verification) is assumed to equal the configured `Server` hostname — NWWS-OI
   doesn't use a separate XMPP domain from its connect host as far as could be
   determined without a live connection to verify.
+
+## Known open issue (2026-08-23)
+
+A real user with valid NWWS-OI credentials hit `"xmpp connection error"
+error="unknown namespace http://jabber.org/protocol/muc <presence/>"`
+immediately after `"joining MUC room"` logged. Root-cause investigation so
+far: the exact error string was traced to `stanza.NextPacket`'s top-level
+dispatch (`gosrc.io/xmpp@v0.5.1/stanza/parser.go`), meaning the decoder
+encountered a top-level stanza whose root element was locally named
+`presence` under an active default namespace of `http://jabber.org/protocol/muc`
+— not the expected `jabber:client`. Several plausible reconstructions of a
+XEP-0045 join-confirmation presence (bare, with `<status code="110"/>`, with
+an XEP-0203 `<delay>` stamp, an error/rejection presence) were fed through
+the actual library decoder and all decoded cleanly with no desync, which
+rules out the initial hypothesis (that the library's failure to register a
+`PresExtension` for the `http://jabber.org/protocol/muc#user` namespace
+causes a token-stream desync — verified false: unrecognized elements are
+simply skipped token-by-token without desyncing, confirmed via direct
+reproduction). No NWWS-OI test credentials were available to reproduce
+against the real server directly, so a `-debug_xmpp_log <path>` CLI flag was
+added (`internal/config`, wired in `internal/nwwsclient.Run`) to capture raw
+wire traffic from an affected user's real session for further diagnosis.
+Still open pending that evidence.

@@ -124,3 +124,30 @@ func TestLoad_FlagExplicitlySetToZeroValueWins(t *testing.T) {
 		t.Error("Retry = true, want false: an explicitly-passed -retry=false must win over the true default")
 	}
 }
+
+func TestLoad_DebugXMPPLog(t *testing.T) {
+	cfg, err := load([]string{
+		"-username", "u",
+		"-password", "p",
+		"-debug_xmpp_log", "/tmp/wire.log",
+	}, filepath.Join(t.TempDir(), "missing.json"))
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.DebugXMPPLog != "/tmp/wire.log" {
+		t.Errorf("DebugXMPPLog = %q, want /tmp/wire.log", cfg.DebugXMPPLog)
+	}
+}
+
+func TestLoad_DebugXMPPLogDefaultsToDisabled(t *testing.T) {
+	cfg, err := load([]string{
+		"-username", "u",
+		"-password", "p",
+	}, filepath.Join(t.TempDir(), "missing.json"))
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.DebugXMPPLog != "" {
+		t.Errorf("DebugXMPPLog = %q, want empty (disabled by default)", cfg.DebugXMPPLog)
+	}
+}

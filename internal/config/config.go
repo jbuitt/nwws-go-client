@@ -19,6 +19,11 @@ type Config struct {
 	PanRunLog  string
 	Retry      bool
 	UseTLS     bool
+
+	// DebugXMPPLog, if set, writes the raw XMPP wire traffic (post-STARTTLS,
+	// so it includes the base64-encoded SASL auth exchange) to this file
+	// path, for diagnosing protocol-level issues. Off by default.
+	DebugXMPPLog string
 }
 
 const (
@@ -76,6 +81,7 @@ func load(args []string, defaultConfigPath string) (Config, error) {
 	panRunLog := fs.String("pan_run_log", "", "log file for PAN script output (defaults to main log)")
 	retry := fs.Bool("retry", DefaultRetry, "automatically reconnect if disconnected")
 	useTLS := fs.Bool("use_tls", DefaultUseTLS, "use STARTTLS when connecting")
+	debugXMPPLog := fs.String("debug_xmpp_log", "", "write raw XMPP wire traffic to this file for troubleshooting (contains the base64 SASL auth exchange, so treat it as sensitive)")
 
 	if err := fs.Parse(args); err != nil {
 		return Config{}, err
@@ -123,6 +129,9 @@ func load(args []string, defaultConfigPath string) (Config, error) {
 	}
 	if explicit["use_tls"] {
 		cfg.UseTLS = *useTLS
+	}
+	if explicit["debug_xmpp_log"] {
+		cfg.DebugXMPPLog = *debugXMPPLog
 	}
 
 	if cfg.Username == "" || cfg.Password == "" {

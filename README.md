@@ -49,3 +49,16 @@ disconnects cleanly before exiting.
 If `pan_run` is set, it's invoked as `pan_run <path-to-saved-product-file>`
 after each newly-saved (non-duplicate) product, asynchronously with a 30s
 timeout. Its output goes to `pan_run_log` if set, otherwise to the main log.
+
+## Troubleshooting
+
+`-debug_xmpp_log <path>` writes the raw XMPP wire traffic to a file, useful
+for diagnosing connection/MUC-join problems. It's CLI-flag-only (no env var
+or JSON key) since it's meant for one-off diagnostic runs, not something to
+leave enabled persistently.
+
+**The resulting file contains your base64-encoded SASL login exchange** —
+treat it as sensitive, don't commit it or paste it in full anywhere. When
+sharing it for troubleshooting, share only the portion from after the
+`connecting to NWWS-OI` / auth-success point onward (e.g. everything from
+the outgoing `<presence>` MUC-join stanza forward).
