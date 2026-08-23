@@ -82,9 +82,8 @@ not-yet-seen malformation.
 
 ## Author
 
-+       [jbuitt at gmail.com](mailto:jbuitt@gmail.com)
+[jbuitt at gmail.com](mailto:jbuitt@gmail.com)
 
 ## License
 
 See [LICENSE](https://github.com/jbuitt/nwws-go-client/blob/master/LICENSE) file.
-
