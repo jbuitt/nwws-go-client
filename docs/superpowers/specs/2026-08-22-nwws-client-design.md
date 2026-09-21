@@ -253,6 +253,33 @@ fails (i.e. on every disconnect):
 > against reuse), so it's the call that actually gets the client receiving
 > messages again after a drop.
 
+> **Amendment (2026-09-21):** every connection attempt, initial or
+> reconnect, now builds a brand-new `xmpp.Client` instead of calling
+> `Connect()` again on the same one. A long-running production instance
+> logged `NextStart XML syntax error ... unexpected EOF` (server dropped the
+> session), after which *every* reconnect failed, each taking ~3.5 minutes,
+> with `expected <stream> or <open> but got <iq>` followed by `unknown
+> namespace urn:xmpp:ping <ping/>`. Reproduced locally with a mock XMPP
+> server (STARTTLS + SASL PLAIN + bind): in `gosrc.io/xmpp` v0.5.1
+> `XMPPTransport.Connect()` never resets its `isSecure` flag and
+> `NewSession` reuses the old `Session` (`TlsEnabled` stays true), so a
+> second `Connect()` on the same client skips STARTTLS and attempts SASL
+> over the fresh plaintext socket — against an optional-TLS server that
+> silently sends the password in the clear. (My earlier reading of upstream
+> `main`, which does reset `isSecure`, did not match the pinned v0.5.1, and
+> the earlier "reuse is safe" conclusion was wrong.) The stray `ping` error
+> came from the goroutine `connect()` spawns after a failed `NewSession`,
+> which keeps reading the same decoder after `InitStream` consumed the
+> `<iq>` start tag. Consequences: (1) a per-client generation counter
+> discards error callbacks from dead/abandoned clients; (2) each attempt is
+> bounded by a 60s `connectTimeout` (the library has no read deadlines); an
+> attempt abandoned mid-`Connect()` is closed only after `Connect()` returns
+> (closing concurrently races on transport fields); (3) the old "accepted
+> residual" `sync.WaitGroup` shutdown race is gone — in-flight work is now
+> counted by a mutex-based tracker that tolerates `add()` racing `wait()`.
+> This supersedes the earlier amendments' reconnect wording where it says
+> `Connect()` is re-invoked on the same client.
+
 ## Graceful shutdown
 
 On SIGINT/SIGTERM:
